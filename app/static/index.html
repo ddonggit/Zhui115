@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zhui115 · 追剧管理</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 侧边栏 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <h1 class="logo">Zhui115</h1>
+      <p class="subtitle">自动追剧 · 115 离线</p>
+    </div>
+    <nav class="nav">
+      <a class="nav-item active" data-page="dashboard" href="#dashboard">
+        <span class="nav-icon">📊</span> 总览
+      </a>
+      <a class="nav-item" data-page="sources" href="#sources">
+        <span class="nav-icon">📡</span> RSS 源
+      </a>
+      <a class="nav-item" data-page="tasks" href="#tasks">
+        <span class="nav-icon">📥</span> 离线任务
+      </a>
+      <a class="nav-item" data-page="retry" href="#retry">
+        <span class="nav-icon">🔄</span> 重试队列
+      </a>
+      <a class="nav-item" data-page="history" href="#history">
+        <span class="nav-icon">📋</span> 操作日志
+      </a>
+      <a class="nav-item" data-page="settings" href="#settings">
+        <span class="nav-icon">⚙️</span> 设置
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="status-badge" id="conn-status">
+        <span class="dot off"></span> 115 未连接
+      </div>
+      <div class="status-badge" id="sched-status">
+        <span class="dot on"></span> 调度运行中
+      </div>
+    </div>
+  </aside>
+
+  <!-- 主内容 -->
+  <main class="main" id="main">
+    <header class="topbar">
+      <button class="menu-btn" id="menuToggle">☰</button>
+      <h2 class="page-title" id="pageTitle">总览</h2>
+      <div class="topbar-actions">
+      </div>
+    </header>
+
+    <div class="content" id="content">
+      <!-- 各页面由 JS 动态渲染 -->
+    </div>
+  </main>
+</div>
+
+<!-- 弹窗 -->
+<div class="modal-overlay" id="modalOverlay" style="display:none">
+  <div class="modal" id="modalBox">
+    <div class="modal-header">
+      <h3 id="modalTitle">标题</h3>
+      <button class="modal-close" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

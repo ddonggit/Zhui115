@@ -1,0 +1,19 @@
+# Zhui115 docker-compose.yaml
+
+services:
+  zhui115:
+    build: .
+    container_name: zhui115
+    restart: unless-stopped
+    ports:
+      - "8300:8300"
+    volumes:
+      - /path/to/Zhui115/data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+      - ZHUI115_LOG_LEVEL=DEBUG
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

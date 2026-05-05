@@ -1,0 +1,5 @@
+﻿p115client==0.0.8.4.8
+requests==2.32.3
+feedparser==6.0.12
+APScheduler==3.11.2
+cloudscraper==1.2.71
