@@ -9,7 +9,9 @@
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+# 注意: PyInstaller 通过 exec() 执行 spec 文件，命名空间中无 __file__！
+# 必须使用 PyInstaller 提供的 SPEC/SPECPATH/DISTPATH 等变量。
+ROOT = Path(SPECPATH)
 
 a = Analysis(
     ['desktop.py'],
