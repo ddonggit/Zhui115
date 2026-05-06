@@ -17,7 +17,11 @@ from .api import route
 
 logger = logging.getLogger("zhui115.web")
 
-STATIC_DIR = Path(__file__).parent.parent / "static"
+# __file__ 在 PyInstaller 分析阶段可能未定义，加保护
+try:
+    STATIC_DIR = Path(__file__).parent.parent / "static"
+except NameError:
+    STATIC_DIR = Path.cwd() / "app" / "static"
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
