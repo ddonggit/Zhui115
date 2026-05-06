@@ -45,7 +45,11 @@ from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 # ── PyInstaller 路径兼容 ──
-_ROOT = os.path.dirname(os.path.abspath(__file__))
+# __file__ 在 PyInstaller 分析阶段可能未定义，加保护
+try:
+    _ROOT = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _ROOT = os.getcwd()
 _MEIPASS = getattr(sys, '_MEIPASS', _ROOT)
 if _MEIPASS not in sys.path:
     sys.path.insert(0, _MEIPASS)
