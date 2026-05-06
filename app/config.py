@@ -19,7 +19,11 @@ def _get_data_dir() -> Path:
         return Path(sys.executable).resolve().parent / "data"
     else:
         # 开发模式: 项目根目录的 data/
-        return Path(__file__).resolve().parent.parent / "data"
+        # __file__ 在 PyInstaller 分析阶段可能未定义
+        try:
+            return Path(__file__).resolve().parent.parent / "data"
+        except NameError:
+            return Path.cwd() / "data"
 
 
 DATA_DIR = _get_data_dir()
