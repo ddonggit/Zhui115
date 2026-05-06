@@ -53,6 +53,10 @@ def _init_tables(conn):
             status      TEXT    NOT NULL DEFAULT '等待提交',
             -- status: 等待提交 / 已提交 / 失败 / 已完成
             retry_count INTEGER DEFAULT 0,
+            episode_num INTEGER DEFAULT 0,
+            season_num  INTEGER DEFAULT 0,
+            quality     TEXT    DEFAULT '',
+            image_url   TEXT    DEFAULT '',
             message     TEXT    DEFAULT '',
             created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -93,7 +97,26 @@ def _init_tables(conn):
             value TEXT
         );
     """)
+
+    # 迁移：为已有数据库添加新列
+    _migrate_columns(conn)
     conn.commit()
+
+
+def _migrate_columns(conn):
+    """为已存在的表添加新列（兼容旧数据库）"""
+    _add_col(conn, "offline_tasks", "episode_num", "INTEGER DEFAULT 0")
+    _add_col(conn, "offline_tasks", "season_num", "INTEGER DEFAULT 0")
+    _add_col(conn, "offline_tasks", "quality", "TEXT DEFAULT ''")
+    _add_col(conn, "offline_tasks", "image_url", "TEXT DEFAULT ''")
+
+
+def _add_col(conn, table, col, col_def):
+    """安全地添加列（列已存在时忽略）"""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+    except sqlite3.OperationalError:
+        pass  # 列已存在，忽略
 
 
 # ── 剧集去重 ──
@@ -130,15 +153,19 @@ def add_episode(source_name: str, link_hash: str, title: str, link: str,
 # ── 离线任务 ──
 
 def add_offline_task(source_name: str, title: str, link: str,
-                     link_hash: str) -> int:
+                     link_hash: str,
+                     episode_num: int = 0, season_num: int = 0,
+                     quality: str = "", image_url: str = "") -> int:
     with _lock:
         conn = get_conn()
         try:
             cur = conn.execute(
                 """INSERT INTO offline_tasks
-                   (source_name, title, link, link_hash, status)
-                   VALUES (?,?,?,?,'等待提交')""",
-                (source_name, title, link, link_hash),
+                   (source_name, title, link, link_hash,
+                    episode_num, season_num, quality, image_url, status)
+                   VALUES (?,?,?,?,?,?,?,?,'等待提交')""",
+                (source_name, title, link, link_hash,
+                 episode_num, season_num, quality, image_url),
             )
             conn.commit()
             return cur.lastrowid
@@ -148,7 +175,8 @@ def add_offline_task(source_name: str, title: str, link: str,
 
 def update_offline_task(task_id: int, status: str = None,
                         info_hash: str = None, message: str = None,
-                        retry_count: int = None) -> bool:
+                        retry_count: int = None,
+                        image_url: str = None) -> bool:
     with _lock:
         conn = get_conn()
         try:
@@ -166,6 +194,9 @@ def update_offline_task(task_id: int, status: str = None,
             if retry_count is not None:
                 sets.append("retry_count=?")
                 vals.append(retry_count)
+            if image_url is not None:
+                sets.append("image_url=?")
+                vals.append(image_url)
             sets.append("updated_at=datetime('now')")
             vals.append(task_id)
             sql = f"UPDATE offline_tasks SET {', '.join(sets)} WHERE id=?"
@@ -344,6 +375,9 @@ def vacuum(keep_days: int = 60):
             )
             conn.commit()
             conn.execute("VACUUM")
+            # 切回 WAL 模式，确保下次连接用 WAL
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.commit()
         except Exception as e:
             raise RuntimeError(f"清理失败: {e}")
         finally:

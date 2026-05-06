@@ -28,6 +28,7 @@ from .db import (
 )
 from .rss import parse_rss
 from .offline115 import get_client, submit_urls, get_save_dir_id, query_quota, extract_info_hash
+from .notifier import notify_success, notify_failure, notify_rss_failure
 from p115client import check_response
 
 logger = logging.getLogger("zhui115.scheduler")
@@ -48,6 +49,7 @@ def _init_source_state(name: str) -> dict:
             "fail_count": 0,        # 连续失败次数
             "last_success": None,   # 最后一次成功时间
             "consecutive_cf": 0,    # 连续 Cloudflare 拦截次数
+            "notified_fail": False,  # 是否已发送失败通知（避免重复）
         }
         _source_state[name] = st
     return st
@@ -144,12 +146,18 @@ def check_all_sources():
             logger.warning("源 %s 连续 %d 次触发 Cloudflare，跳过本轮",
                            name, st["consecutive_cf"])
             add_history("rss_skip", f"{name}: 连续触发Cloudflare，跳过本轮")
+            if not st.get("notified_fail"):
+                notify_rss_failure(name, "连续触发 Cloudflare 挑战，源可能已失效")
+                st["notified_fail"] = True
             continue
         # 连续失败 >5 次 → 跳过本轮
         if st["fail_count"] >= 5:
             logger.warning("源 %s 连续失败 %d 次，跳过本轮",
                            name, st["fail_count"])
             add_history("rss_skip", f"{name}: 连续失败{st['fail_count']}次，跳过本轮")
+            if not st.get("notified_fail"):
+                notify_rss_failure(name, f"连续 {st['fail_count']} 次获取失败，源可能已失效")
+                st["notified_fail"] = True
             continue
 
         # ---- 源间随机延迟（最后一个源不必延迟） ----
@@ -176,15 +184,20 @@ def check_all_sources():
         # 成功恢复
         st["fail_count"] = 0
         st["consecutive_cf"] = 0
+        st["notified_fail"] = False
         st["last_success"] = datetime.now(timezone.utc)
 
         if not items:
             logger.info("RSS 源 %s 无新条目", name)
             continue
 
-        # 检查配额
-        if quota is None:
-            quota = query_quota()
+        # 检查配额（复用外层已创建的 client，避免重复创建）
+        if quota is None and client:
+            try:
+                quota_resp = check_response(client.offline_quota_info())
+                quota = {"ok": True, "data": quota_resp}
+            except Exception as e:
+                quota = {"ok": False, "error": str(e)}
         if quota.get("ok") and quota["data"].get("quota", 0) <= 0:
             logger.warning("115 离线配额不足，跳过提交")
             add_history("quota_warning", "115 离线配额不足")
@@ -215,6 +228,10 @@ def check_all_sources():
                 title=item["title"],
                 link=item["link"],
                 link_hash=link_hash,
+                episode_num=item.get("episode_num", 0),
+                season_num=item.get("season_num", 0),
+                quality=item.get("quality", ""),
+                image_url=item.get("image_url", ""),
             )
             new_links.append({
                 "task_id": task_id,
@@ -369,6 +386,17 @@ def process_retry_queue():
                                 message=f"重试{max_retries}次均失败")
             remove_retry(task_id)
             add_history("retry_giveup", f"[{task['source_name']}] {task['title'][:60]}")
+            # 发送失败通知
+            notify_failure(
+                title=task["title"],
+                source_name=task["source_name"],
+                reason=f"重试{max_retries}次均失败",
+                episode_num=task.get("episode_num", 0),
+                season_num=task.get("season_num", 0),
+                quality=task.get("quality", ""),
+                image_url=task.get("image_url", ""),
+                task_id=task_id,
+            )
             continue
 
         logger.info("重试任务(%d/%d): %s", retry_count, max_retries, task["title"][:50])
@@ -403,18 +431,30 @@ def sync_offline_status():
     conn = None
     try:
         conn = get_conn()
-        # 获取本地待同步的任务 info_hash 列表
+        # 获取本地待同步的任务（含标题、封面、清晰度等，用于通知）
         rows = conn.execute(
-            "SELECT id, info_hash FROM offline_tasks "
-            "WHERE status IN ('已提交') AND info_hash != ''"
+            """SELECT id, info_hash, title, source_name,
+                      episode_num, season_num, quality, image_url
+               FROM offline_tasks
+               WHERE status IN ('已提交') AND info_hash != ''"""
         ).fetchall()
 
         if not rows:
             logger.debug("无待同步的离线任务")
             return
 
-        # 构建 info_hash → 本地 id 的映射
-        local_map = {r["info_hash"]: r["id"] for r in rows}
+        # 构建 info_hash → 本地信息的映射
+        local_map = {}
+        for r in rows:
+            local_map[r["info_hash"]] = {
+                "id": r["id"],
+                "title": r["title"],
+                "source_name": r["source_name"],
+                "episode_num": r["episode_num"] or 0,
+                "season_num": r["season_num"] or 0,
+                "quality": r["quality"] or "",
+                "image_url": r["image_url"] or "",
+            }
         logger.info("本地待同步 info_hash: %s", list(local_map.keys()))
 
         # 分页拉取 115 离线任务列表
@@ -426,28 +466,49 @@ def sync_offline_status():
                 tasks_115 = data.get("tasks", []) if isinstance(data, dict) else []
                 if not tasks_115:
                     break
-                for t in tasks_115:
-                    if page == 1 and tasks_115.index(t) == 0:
+                for i, t in enumerate(tasks_115):
+                    if page == 1 and i == 0:
                         logger.debug("115 任务样例: %s", {k: v for k, v in t.items() if k in ('info_hash', 'state', 'ih', 'status', 'task_id', 'task_name')})
                     # 兼容不同字段名
                     ih = t.get("info_hash") or t.get("ih") or ""
                     if not ih:
                         continue
                     if ih in local_map:
-                        task_id = local_map.pop(ih)
+                        local_info = local_map.pop(ih)
+                        task_id = local_info["id"]
                         # 兼容不同字段名
                         state = t.get("state") or t.get("status") or 0
                         if isinstance(state, str):
                             state = {"已完成": 2, "下载中": 1, "失败": 3}.get(state, 0)
                         if state == 2:  # 完成
                             update_offline_task(task_id, status="已完成",
-                                                message="下载完成")
-                        elif state == 1:  # 下载中
+                                                message="离线完成")
+                            # 发送成功通知（含封面、清晰度等）
+                            notify_success(
+                                title=local_info["title"],
+                                source_name=local_info["source_name"],
+                                episode_num=local_info.get("episode_num", 0),
+                                season_num=local_info.get("season_num", 0),
+                                quality=local_info.get("quality", ""),
+                                image_url=local_info.get("image_url", ""),
+                                task_id=task_id,
+                            )
+                        elif state == 1:  # 离线中
                             update_offline_task(task_id, status="已提交",
-                                                message="下载中")
+                                                message="离线中")
                         elif state == 3:  # 失败
                             update_offline_task(task_id, status="失败",
-                                                message="下载失败")
+                                                message="离线失败")
+                            notify_failure(
+                                title=local_info["title"],
+                                source_name=local_info["source_name"],
+                                reason="115 离线失败",
+                                episode_num=local_info.get("episode_num", 0),
+                                season_num=local_info.get("season_num", 0),
+                                quality=local_info.get("quality", ""),
+                                image_url=local_info.get("image_url", ""),
+                                task_id=task_id,
+                            )
                 page += 1
                 if len(tasks_115) < 20:
                     break

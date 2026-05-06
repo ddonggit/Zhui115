@@ -1,126 +1,108 @@
 """Zhui115 RSS 抓取与解析模块
 
 统一入口 parse_rss(url) -> list[dict]
-每个条目: {title, link, link_hash, episode_num, season_num}
+每个条目: {title, link, link_hash, episode_num, season_num, image_url, quality}
 支持标准 RSS 2.0 / Atom / 磁力链 / ED2K 链接提取
-
-防触发 Cloudflare 措施：
-  - 随机 User-Agent
-  - 检测 CF 挑战页 / 非 RSS 响应
-  - 源级限频检查（外部调用者负责间隔）
 """
 
 import hashlib
 import logging
-import random
 import re
-import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlparse, parse_qs
 
-import feedparser
+import cloudscraper
+
+from .config import load_global
 
 logger = logging.getLogger("zhui115.rss")
 
-# 优先使用 cloudscraper（绕过 Cloudflare），否则回落 requests
-try:
-    import cloudscraper
-    _session = cloudscraper.create_scraper()
-    logger.info("使用 cloudscraper（已启用 Cloudflare 绕过）")
-except ImportError:
-    import requests
-    _session = requests.Session()
-    logger.info("使用 requests（未安装 cloudscraper）")
-
-# 模拟真实浏览器的 User-Agent 池（轮换使用，降低被识别概率）
-_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+# 用户代理池，随机轮换降低被拦截概率
+USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-    "(KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) "
     "Gecko/20100101 Firefox/121.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) "
+    "Gecko/20100101 Firefox/121.0",
 ]
 
 
-def _random_headers() -> dict:
-    """生成带随机 UA 的请求头"""
-    return {
-        "User-Agent": random.choice(_USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                  "image/webp,*/*;q=0.8",
+def _build_scraper() -> cloudscraper.CloudScraper:
+    """构建一个带随机 UA 的 cloudscraper 实例"""
+    import random
+    scraper = cloudscraper.create_scraper(
+        browser={
+            "browser": "chrome",
+            "platform": "windows",
+            "mobile": False,
+        }
+    )
+    scraper.headers.update({
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-    }
+    })
+    return scraper
 
 
-def _is_cloudflare_challenge(content: bytes) -> bool:
-    """检测响应是否为 Cloudflare 挑战页"""
-    text = content[:2000].lower()
-    signals = [b"just a moment", b"checking your browser",
-               b"cf-browser-verification", b"cf_chl_opt",
-               b"challenge-platform", b"__cf_chl_f_tk"]
-    return any(s in text for s in signals)
-
-
-def _looks_like_rss(content: bytes) -> bool:
-    """粗略判断内容是否为 RSS / Atom XML"""
-    text = content[:500].lower()
-    return any(s in text for s in [b"<rss", b"<feed", b"<channel>",
-                                    b"<item>", b"<entry>"])
-
-
-def parse_rss(url: str, timeout: int = 60) -> list[dict]:
+def parse_rss(url: str) -> list[dict]:
     """抓取并解析 RSS 源，返回条目列表
 
-    自动检测 Cloudflare 挑战页并抛出明确错误。
+    参数:
+        url: RSS 订阅地址
+    返回:
+        list[dict]: 每个条目包含 title, link, link_hash, episode_num, season_num,
+                    image_url, quality
     """
+    import feedparser
+
+    scraper = _build_scraper()
     try:
-        resp = _session.get(url, timeout=timeout, headers=_random_headers())
+        resp = scraper.get(url, timeout=60)
         resp.raise_for_status()
-        content = resp.content
     except Exception as e:
-        raise RuntimeError(f"获取 RSS 失败: {e}")
+        logger.warning("RSS 请求失败 [%s]: %s", url[:60], e)
+        raise
 
-    # 检测 Cloudflare 挑战
-    if _is_cloudflare_challenge(content):
-        raise RuntimeError("触发了 Cloudflare 挑战，已被拦截")
+    content = resp.content
+    # 检查是否触发了 Cloudflare 挑战
+    text_lower = content[:2000].lower()
+    if b"just a moment" in content or b"cf-browser-verification" in content:
+        logger.warning("Cloudflare 验证拦截: %s", url[:60])
+        raise RuntimeError("Cloudflare 验证拦截")
 
-    # 检测是否真的是 RSS XML
-    if not _looks_like_rss(content):
-        # 可能是 404 页面或非 XML 错误页
-        snippet = content[:200].decode("utf-8", errors="replace")
-        logger.warning("响应不是 RSS XML: %s ...", snippet)
-        raise RuntimeError("返回内容不是有效 RSS，可能是被拦截或错误页面")
+    # 用 feedparser 解析
+    try:
+        feed = feedparser.parse(content)
+    except Exception as e:
+        logger.warning("RSS 解析失败 [%s]: %s", url[:60], e)
+        raise
 
-    feed = feedparser.parse(content)
     items = []
-
     for entry in feed.entries:
-        title = entry.get("title", "").strip()
-        if not title:
-            continue
-
-        # 提取链接：优先磁力/ED2K
         link = _extract_link(entry)
         if not link:
             continue
 
-        logger.debug("提取到链接 [%s]: %s", title[:40], link[:120])
+        title = entry.get("title", "").strip()
+        if not title:
+            continue
 
+        # 生成链接指纹（用于去重）
         link_hash = hashlib.sha256(link.encode()).hexdigest()[:16]
 
-        # 尝试从标题提取集数和季数
+        # 尝试从标题提取集数、季数和清晰度
         ep_num = _extract_episode(title)
         season_num = _extract_season(title)
+        quality = _extract_quality(title)
+        # 尝试从条目中提取封面图
+        image_url = _extract_image(entry)
 
         items.append({
             "title": title,
@@ -128,6 +110,8 @@ def parse_rss(url: str, timeout: int = 60) -> list[dict]:
             "link_hash": link_hash,
             "episode_num": ep_num,
             "season_num": season_num,
+            "image_url": image_url,
+            "quality": quality,
         })
 
     return items
@@ -211,3 +195,58 @@ def _extract_season(title: str) -> int:
             except ValueError:
                 pass
     return 0
+
+
+def _extract_quality(title: str) -> str:
+    """从标题中提取清晰度/编码信息"""
+    patterns = [
+        (r'(2160p|2160P|4K|4k)', '4K'),
+        (r'(1080p|1080P)', '1080p'),
+        (r'(720p|720P)', '720p'),
+        (r'(480p|480P)', '480p'),
+        (r'(HEVC|hevc|H[. ]?265|h[. ]?265|x265)', 'HEVC'),
+        (r'(H[. ]?264|h[. ]?264|x264)', 'H264'),
+        (r'(Hi10P|hi10p|10bit)', '10bit'),
+        (r'(DV|Dolby Vision|dovi)', 'DV'),
+        (r'(HDR|hdr)', 'HDR'),
+    ]
+    seen = set()
+    parts = []
+    for pat, label in patterns:
+        m = re.search(pat, title)
+        if m and label not in seen:
+            seen.add(label)
+            parts.append(label)
+    return " · ".join(parts[:4])  # 最多取 4 个标签
+
+
+def _extract_image(entry) -> str:
+    """从 RSS 条目中提取封面图 URL"""
+    # 1. 检查 links 字段中的图片链接
+    for link in entry.get("links", []):
+        href = link.get("href", "")
+        type_ = link.get("type", "")
+        if type_.startswith("image/") and href:
+            return href
+
+    # 2. 检查 enclosures 字段中的图片
+    for enc in entry.get("enclosures", []):
+        href = enc.get("href", "")
+        type_ = enc.get("type", "")
+        if type_.startswith("image/") and href:
+            return href
+
+    # 3. 从 content/summary/description 的 HTML 中提取 <img> 标签
+    content_text = ""
+    for c in entry.get("content", []):
+        content_text += c.get("value", "")
+    content_text += entry.get("summary", "")
+    content_text += entry.get("description", "")
+
+    img_match = re.search(r'<img[^>]+src="([^"]+)"', content_text)
+    if img_match:
+        url = img_match.group(1)
+        logger.debug("RSS 条目中发现图片: %s", url[:80])
+        return url
+
+    return ""

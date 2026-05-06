@@ -25,6 +25,14 @@ DEFAULT_GLOBAL = {
     "history_keep_days": 60,   # 历史记录保留天数
     "quota_warning": 10,       # 剩余配额低于此值时告警
     "web_port": 8300,          # Web 端口
+    # ── 通知设置 ──
+    "telegram_bot_token": "",  # Telegram Bot Token
+    "telegram_chat_id": "",   # Telegram 接收通知的 Chat ID
+    "notify_on_success": True,   # 离线成功时通知
+    "notify_on_failure": True,   # 离线失败时通知
+    "notify_on_rss_failure": True,  # RSS 源失效时通知
+    # ── 封面图查找 ──
+    "tmdb_api_key": "",          # TMDB API Key（用于按标题搜索封面）
 }
 
 # ── 默认 RSS 源 ──

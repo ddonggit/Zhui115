@@ -361,7 +361,6 @@ function collectSourceForm() {
     filter_exclude: exc,
     episode_pattern: '',
     auto_episode: $('#sf_auto').checked,
-    last_episode: 0,
     regex_filter: $('#sf_regex').checked,
     check_interval: 0,
     dedup_group: '',
@@ -498,10 +497,6 @@ pages.tasks = async function() {
       api('GET', '/sources'),
     ]);
 
-    const statusMap = {
-      pending: '等待提交', submitting: '等待提交', submitted: '已提交',
-      downloading: '已提交', done: '已完成', failed: '失败',
-    };
     const statusCss = {
       '等待提交': 'pending', '已提交': 'submitted', '失败': 'failed', '已完成': 'done',
     };
@@ -541,7 +536,7 @@ pages.tasks = async function() {
                   <tr>
                     <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</td>
                     <td><span class="tag" style="background:var(--bg-hover)">${escapeHtml(t.source_name)}</span></td>
-                    <td><span class="tag tag-${statusCss[t.status] || 'pending'}">${statusMap[t.status] || t.status}</span></td>
+                    <td><span class="tag tag-${statusCss[t.status] || 'pending'}">${t.status}</span></td>
                     <td>${t.retry_count || 0}</td>
                     <td style="font-size:0.8rem;color:var(--text-secondary)">${formatDate(t.created_at)}</td>
                   </tr>
@@ -740,6 +735,49 @@ pages.settings = async function() {
       </div>
 
       <div class="section">
+        <div class="section-title">🔔 通知设置</div>
+        <div class="card">
+          <div class="form-group">
+            <label class="form-label">Telegram Bot Token</label>
+            <input class="form-input" id="set_telegram_token" type="password"
+              placeholder="123456:ABC-def_ghI" value="${escapeHtml(cfg.telegram_bot_token || '')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Telegram Chat ID</label>
+            <input class="form-input" id="set_telegram_chat" type="text"
+              placeholder="123456789 或 @username" value="${escapeHtml(cfg.telegram_chat_id || '')}">
+          </div>
+          <div class="form-row" style="margin-bottom:12px">
+            <label class="checkbox-label">
+              <input type="checkbox" id="set_notify_success"
+                ${cfg.notify_on_success !== false ? 'checked' : ''}>
+              离线任务成功时通知
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="set_notify_failure"
+                ${cfg.notify_on_failure !== false ? 'checked' : ''}>
+              离线任务失败时通知
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="set_notify_rss"
+                ${cfg.notify_on_rss_failure !== false ? 'checked' : ''}>
+              RSS 源失效时通知
+            </label>
+          </div>
+          <div class="form-group">
+            <label class="form-label">TMDB API Key <span class="text-muted" style="font-size:0.75rem">（可选，无封面图时自动搜索）</span></label>
+            <input class="form-input" id="set_tmdb_key" type="password"
+              placeholder="https://www.themoviedb.org/settings/api" value="${escapeHtml(cfg.tmdb_api_key || '')}">
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="saveNotification()">💾 保存通知设置</button>
+            <button class="btn btn-sm" onclick="testNotification()">📤 发送测试通知</button>
+            <span id="notifyStatus" style="font-size:0.82rem;color:var(--text-muted)"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
         <div class="section-title">🔄 调度控制</div>
         <div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span>调度器: <span class="tag ${sched.running ? 'tag-done' : 'tag-failed'}">${sched.running ? '运行中' : '已停止'}</span></span>
@@ -816,6 +854,45 @@ async function saveSettings() {
   } catch (e) {
     $('#settingsStatus').textContent = '❌ ' + e.message;
     toast('保存失败', 'error');
+  }
+}
+
+async function saveNotification() {
+  try {
+    await api('PUT', '/global', {
+      telegram_bot_token: $('#set_telegram_token').value.trim(),
+      telegram_chat_id: $('#set_telegram_chat').value.trim(),
+      notify_on_success: $('#set_notify_success').checked,
+      notify_on_failure: $('#set_notify_failure').checked,
+      notify_on_rss_failure: $('#set_notify_rss').checked,
+      tmdb_api_key: $('#set_tmdb_key').value.trim(),
+    });
+    $('#notifyStatus').textContent = '✅ 已保存';
+    toast('通知设置已保存', 'success');
+  } catch (e) {
+    $('#notifyStatus').textContent = '❌ ' + e.message;
+    toast('保存失败', 'error');
+  }
+}
+
+async function testNotification() {
+  const token = $('#set_telegram_token').value.trim();
+  const chatId = $('#set_telegram_chat').value.trim();
+  if (!token || !chatId) {
+    toast('请先填写 Bot Token 和 Chat ID', 'warning');
+    return;
+  }
+  $('#notifyStatus').textContent = '⏳ 发送中...';
+  try {
+    const res = await api('POST', '/notify/test', {
+      telegram_bot_token: token,
+      telegram_chat_id: chatId,
+    });
+    $('#notifyStatus').textContent = '✅ ' + (res.message || '已发送');
+    toast('测试通知已发送', 'success');
+  } catch (e) {
+    $('#notifyStatus').textContent = '❌ ' + e.message;
+    toast('测试发送失败: ' + e.message, 'error');
   }
 }
 
@@ -937,6 +1014,8 @@ window.changeTaskPage = changeTaskPage;
 window.changeHistoryPage = changeHistoryPage;
 window.saveCookie = saveCookie;
 window.saveSettings = saveSettings;
+window.saveNotification = saveNotification;
+window.testNotification = testNotification;
 window.runCheckNow = runCheckNow;
 window.doBackup = doBackup;
 window.showRestore = showRestore;

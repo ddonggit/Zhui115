@@ -24,6 +24,7 @@ from ..db import (
 from ..offline115 import get_client, query_quota, list_offline, submit_urls
 from ..scheduler import check_all_sources, scheduler, reschedule_check
 from ..rss import parse_rss as parse_rss_url
+from ..notifier import notify_test
 
 
 def route(method: str, path: str, body: bytes = b"", query: dict = None):
@@ -49,6 +50,9 @@ def route(method: str, path: str, body: bytes = b"", query: dict = None):
             "cookie_115", "save_dir_id", "save_dir_name",
             "check_interval", "retry_interval", "max_retries",
             "history_keep_days", "quota_warning", "web_port",
+            "telegram_bot_token", "telegram_chat_id",
+            "notify_on_success", "notify_on_failure", "notify_on_rss_failure",
+            "tmdb_api_key",
         ]
         for k in allowed:
             if k in data:
@@ -161,7 +165,6 @@ def route(method: str, path: str, body: bytes = b"", query: dict = None):
 
     # ── 重试队列 ──
     if path == "/api/retry" and method == "GET":
-        from app.db import get_conn
         conn = get_conn()
         try:
             rows = conn.execute(
@@ -216,6 +219,20 @@ def route(method: str, path: str, body: bytes = b"", query: dict = None):
     if path == "/api/scheduler/run-now" and method == "POST":
         check_all_sources()
         return _ok({"message": "已触发检查"})
+
+    # ── 通知 ──
+    if path == "/api/notify/test" and method == "POST":
+        data = _json(body)
+        if data is None:
+            return _err("无效的 JSON")
+        token = data.get("telegram_bot_token", "").strip()
+        chat_id = data.get("telegram_chat_id", "").strip()
+        if not token or not chat_id:
+            return _err("缺少 telegram_bot_token 或 telegram_chat_id")
+        result = notify_test(token, chat_id)
+        if result["ok"]:
+            return _ok({"message": "测试通知发送成功 ✅"})
+        return _err(f"发送失败: {result.get('error', '未知错误')}")
 
     # ── 数据操作 ──
     if path == "/api/data/backup" and method == "GET":
