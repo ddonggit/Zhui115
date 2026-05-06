@@ -4,12 +4,42 @@
 
 ---
 
+## 方式三：Windows 桌面版（带窗口界面）
+
+### 1. 安装依赖
+
+```bash
+pip install -r requirements.txt
+pip install PyQt6 PyQt6-WebEngine pyinstaller
+```
+
+### 2. 打包
+
+```bash
+pyinstaller Zhui115.spec
+```
+
+打包完成后，`dist/Zhui115.exe` 即为 Windows 桌面程序。
+
+> 详细打包说明见 [BUILD_WINDOWS.md](BUILD_WINDOWS.md)
+
+### 3. 运行
+
+双击 `dist/Zhui115.exe`：
+
+- **主窗口**：内嵌浏览器显示 Web 管理界面
+- **系统托盘**：关闭窗口后最小化到托盘，后台继续运行
+- **数据目录**：`dist/data/`（与 exe 同级的 data 文件夹）
+
+---
+
 ## 环境要求
 
 | 项目 | 最低要求 |
 |------|---------|
 | Python | **3.12+**（p115client 强制要求） |
-| 操作系统 | Linux / macOS / Windows |
+| 操作系统 | Linux / macOS / **Windows（桌面版）** |
+| 磁盘 | 至少 100MB（不含下载文件） |
 | 磁盘 | 至少 100MB（不含下载文件） |
 | 网络 | 能访问 115.com、RSS 源 |
 | Docker | 可选（推荐） |
@@ -292,6 +322,10 @@ docker run -e ZHUI115_LOG_LEVEL=DEBUG ... zhui115
 ```
 Zhui115/
 ├── main.py                 # 入口：启动 Web + 调度
+├── desktop.py              # Windows 桌面版入口（PyQt6 窗口）
+├── Zhui115.spec            # PyInstaller 打包配置
+├── BUILD_WINDOWS.md        # Windows 桌面版构建说明
+├── icon.png                # 应用图标
 ├── requirements.txt        # Python 依赖
 ├── Dockerfile              # Docker 构建文件
 ├── docker-compose.yaml     # Docker 编排
