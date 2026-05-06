@@ -1,0 +1,47 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop.py"
+      - "Zhui115.spec"
+      - "app/**"
+      - "web/**"
+      - "requirements.txt"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install PyQt6 PyQt6-WebEngine pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --onefile --windowed --name Zhui115 ^
+            --add-data "web/static;web/static" ^
+            --hidden-import PyQt6.QtWebEngineWidgets ^
+            --hidden-import PyQt6.QtWebEngineCore ^
+            --hidden-import apscheduler.triggers.interval ^
+            --hidden-import apscheduler.triggers.cron ^
+            --hidden-import cloudscraper ^
+            --icon icon.png ^
+            desktop.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhui115-Windows
+          path: dist/Zhui115.exe
