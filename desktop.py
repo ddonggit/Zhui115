@@ -4,8 +4,7 @@
 支持系统托盘、最小化到托盘、后台运行。
 
 打包命令:
-    pip install pyinstaller PyQt6 PyQt6-WebEngine
-    pyinstaller --onefile --windowed --name Zhui115 --icon icon.ico desktop.py
+    pyinstaller --onefile --windowed --name Zhui115 --add-data "app/static;app/static" --hidden-import app.config --hidden-import app.scheduler --hidden-import app.db --hidden-import app.notifier --hidden-import app.rss --hidden-import app.offline115 --hidden-import web.server --hidden-import web.api --hidden-import apscheduler.triggers.interval --hidden-import apscheduler.triggers.cron --hidden-import cloudscraper --icon icon.ico desktop.py
 """
 
 import logging
@@ -13,9 +12,27 @@ import os
 import sys
 import threading
 
-# 确保项目根目录在导入路径中
+# ── 确保 PyInstaller 收集所有需要的模块 ──
+# 全部放在文件顶部，避免 PyInstaller 漏掉
+import app.config
+import app.db
+import app.rss
+import app.offline115
+import app.notifier
+import app.scheduler
+import web.server
+import web.api
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QSystemTrayIcon, QMenu,
+    QMessageBox, QLabel,
+)
+from PyQt6.QtCore import QUrl, Qt
+from PyQt6.QtGui import QIcon, QAction
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+# ── 项目根目录 ──
 _ROOT = os.path.dirname(os.path.abspath(__file__))
-# PyInstaller 打包后，资源文件在 _MEIPASS 目录
 _MEIPASS = getattr(sys, '_MEIPASS', _ROOT)
 if _MEIPASS not in sys.path:
     sys.path.insert(0, _MEIPASS)
@@ -37,13 +54,10 @@ logger = logging.getLogger("zhui115.desktop")
 
 def start_server() -> int:
     """在单独线程中启动 Web 服务，返回实际端口号"""
-    from app.config import load_config
-    from web.server import create_server
-
-    cfg = load_config()
+    cfg = app.config.load_config()
     port = cfg.get("web_port", 8300)
 
-    server = create_server(port)
+    server = web.server.create_server(port)
     actual_port = server.server_address[1]
     logger.info("Web 服务已启动: http://127.0.0.1:%d", actual_port)
 
@@ -55,8 +69,7 @@ def start_server() -> int:
 def start_scheduler_if_needed():
     """启动调度器（非阻塞）"""
     try:
-        from app.scheduler import start as sched_start
-        sched_start()
+        app.scheduler.start()
         logger.info("调度器已启动")
     except Exception as e:
         logger.warning("调度器启动失败: %s", e)
@@ -68,20 +81,11 @@ def start_scheduler_if_needed():
 
 def run_desktop():
     """启动桌面窗口"""
-    from PyQt6.QtWidgets import (
-        QApplication, QMainWindow, QSystemTrayIcon, QMenu,
-        QMessageBox, QWidget, QVBoxLayout, QLabel,
-    )
-    from PyQt6.QtCore import QUrl, Qt, QTimer
-    from PyQt6.QtGui import QIcon, QAction, QFont
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
-
     # ── 启动后端服务 ──
     try:
         port = start_server()
     except Exception as e:
         logger.exception("Web 服务启动失败")
-        # 弹窗提示
         app = QApplication(sys.argv if hasattr(sys, 'frozen') else [])
         QMessageBox.critical(None, "启动失败", f"Web 服务启动失败:\n{e}")
         sys.exit(1)
@@ -91,7 +95,7 @@ def run_desktop():
     # ── 创建 Qt 应用 ──
     qt_app = QApplication(sys.argv if hasattr(sys, 'frozen') else [])
     qt_app.setApplicationName("Zhui115")
-    qt_app.setQuitOnLastWindowClosed(False)  # 关闭窗口不退出
+    qt_app.setQuitOnLastWindowClosed(False)
 
     # ── 主窗口 ──
     window = QMainWindow()
@@ -99,7 +103,6 @@ def run_desktop():
     window.resize(1280, 800)
     window.setMinimumSize(900, 600)
 
-    # 设置图标（如果有）
     icon_path = os.path.join(_ROOT, "icon.png")
     if os.path.exists(icon_path):
         app_icon = QIcon(icon_path)
@@ -112,7 +115,7 @@ def run_desktop():
     browser.setUrl(QUrl(f"http://127.0.0.1:{port}"))
     window.setCentralWidget(browser)
 
-    # ── 加载提示覆盖（页面加载时显示） ──
+    # ── 加载提示覆盖 ──
     loading_label = QLabel("正在加载 Zhui115…", window)
     loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     loading_label.setStyleSheet("""
@@ -125,8 +128,6 @@ def run_desktop():
     """)
     loading_label.setGeometry(0, 0, 1280, 800)
     loading_label.raise_()
-
-    # 页面加载完成后隐藏提示
     browser.loadFinished.connect(lambda: loading_label.hide())
 
     # ── 系统托盘 ──
@@ -136,26 +137,20 @@ def run_desktop():
         if app_icon:
             tray_icon.setIcon(app_icon)
         else:
-            # 没有图标时，创建一个纯色图标
             pix = qt_app.style().standardIcon(
                 qt_app.style().StandardPixmap.SP_ComputerIcon
             )
             tray_icon.setIcon(pix)
 
         tray_icon.setToolTip("Zhui115 — 自动追剧")
-
-        # 托盘右键菜单
         tray_menu = QMenu()
         show_action = QAction("显示窗口", qt_app)
         show_action.triggered.connect(lambda: (window.show(), window.activateWindow()))
         tray_menu.addAction(show_action)
-
         tray_menu.addSeparator()
-
         quit_action = QAction("退出", qt_app)
         quit_action.triggered.connect(qt_app.quit)
         tray_menu.addAction(quit_action)
-
         tray_icon.setContextMenu(tray_menu)
         tray_icon.activated.connect(
             lambda reason: (
@@ -179,21 +174,17 @@ def run_desktop():
             event.accept()
 
     window.closeEvent = close_event
-
-    # ── 窗口显示 ──
     window.show()
 
     # ── 退出清理 ──
     def cleanup():
         logger.info("正在关闭…")
         try:
-            from app.scheduler import stop as sched_stop
-            sched_stop()
+            app.scheduler.stop()
         except Exception:
             pass
 
     qt_app.aboutToQuit.connect(cleanup)
-
     sys.exit(qt_app.exec())
 
 

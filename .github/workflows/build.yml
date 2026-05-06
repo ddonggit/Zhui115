@@ -31,7 +31,7 @@ jobs:
       - name: Build with PyInstaller
         shell: cmd
         run: |
-          pyinstaller --onefile --windowed --name Zhui115 --add-data "app/static;app/static" --hidden-import PyQt6.QtWebEngineWidgets --hidden-import PyQt6.QtWebEngineCore --hidden-import apscheduler.triggers.interval --hidden-import apscheduler.triggers.cron --hidden-import cloudscraper --icon icon.ico desktop.py
+          pyinstaller --onefile --windowed --name Zhui115 --add-data "app/static;app/static" --hidden-import app.config --hidden-import app.scheduler --hidden-import app.db --hidden-import app.notifier --hidden-import app.rss --hidden-import app.offline115 --hidden-import web.server --hidden-import web.api --hidden-import PyQt6.QtWebEngineWidgets --hidden-import PyQt6.QtWebEngineCore --hidden-import apscheduler.triggers.interval --hidden-import apscheduler.triggers.cron --hidden-import cloudscraper --icon icon.ico desktop.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
