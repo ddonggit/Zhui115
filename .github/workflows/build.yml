@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - "desktop.py"
-      - "Zhui115.spec"
       - "app/**"
       - "web/**"
       - "requirements.txt"
@@ -24,21 +23,15 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
+        shell: cmd
         run: |
           pip install -r requirements.txt
           pip install PyQt6 PyQt6-WebEngine pyinstaller
 
       - name: Build with PyInstaller
+        shell: cmd
         run: |
-          pyinstaller --onefile --windowed --name Zhui115 ^
-            --add-data "web/static;web/static" ^
-            --hidden-import PyQt6.QtWebEngineWidgets ^
-            --hidden-import PyQt6.QtWebEngineCore ^
-            --hidden-import apscheduler.triggers.interval ^
-            --hidden-import apscheduler.triggers.cron ^
-            --hidden-import cloudscraper ^
-            --icon icon.png ^
-            desktop.py
+          pyinstaller --onefile --windowed --name Zhui115 --add-data "web/static;web/static" --hidden-import PyQt6.QtWebEngineWidgets --hidden-import PyQt6.QtWebEngineCore --hidden-import apscheduler.triggers.interval --hidden-import apscheduler.triggers.cron --hidden-import cloudscraper --icon icon.png desktop.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
