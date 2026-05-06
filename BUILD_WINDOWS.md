@@ -1,5 +1,10 @@
 # Zhui115 Windows 桌面版 — 构建说明
 
+## ⚠️ 注意
+
+PyInstaller 不支持交叉编译。Windows .exe **必须在一台 Windows 机器上构建**。
+不能在 macOS/Linux 上构建 Windows 版本。
+
 ## 前置依赖
 
 ```bash
@@ -15,21 +20,34 @@ pip install PyQt6 PyQt6-WebEngine pyinstaller
 
 ## 应用图标（可选）
 
-准备一个 256x256 的 PNG 图标，命名为 `icon.png` 放在项目根目录。
-如果没有，可以使用在线工具生成一个，或者跳过（使用默认图标）。
+准备图标文件 `icon.ico` 放在项目根目录（推荐 256x256 多分辨率 .ico）。
+如果没有，可以使用在线工具生成，或者跳过（使用默认图标）。
 
 ## 打包
 
 ```bash
-# 方式一：使用 spec 文件（推荐）
+# 方式一：使用 spec 文件（推荐，和 CI 一致）
 pyinstaller Zhui115.spec
 
 # 方式二：直接命令行打包
 pyinstaller --onefile --windowed --name Zhui115 ^
-  --add-data "web/static;web/static" ^
+  --add-data "app/static;app/static" ^
+  --add-data "app/web;app/web" ^
+  --add-data "app;app" ^
+  --hidden-import app.config ^
+  --hidden-import app.scheduler ^
+  --hidden-import app.db ^
+  --hidden-import app.notifier ^
+  --hidden-import app.rss ^
+  --hidden-import app.offline115 ^
+  --hidden-import app.web.server ^
+  --hidden-import app.web.api ^
   --hidden-import PyQt6.QtWebEngineWidgets ^
+  --hidden-import PyQt6.QtWebEngineCore ^
   --hidden-import apscheduler.triggers.interval ^
   --hidden-import apscheduler.triggers.cron ^
+  --hidden-import cloudscraper ^
+  --icon icon.ico ^
   desktop.py
 ```
 

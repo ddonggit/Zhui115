@@ -3,8 +3,21 @@
 基于 PyQt6 + QWebEngineView，将 Web 管理界面嵌入原生窗口。
 支持系统托盘、最小化到托盘、后台运行。
 
-打包命令:
-    pyinstaller --onefile --windowed --name Zhui115 --add-data "app/static;app/static" --hidden-import app.config --hidden-import app.scheduler --hidden-import app.db --hidden-import app.notifier --hidden-import app.rss --hidden-import app.offline115 --hidden-import web.server --hidden-import web.api --hidden-import apscheduler.triggers.interval --hidden-import apscheduler.triggers.cron --hidden-import cloudscraper --icon icon.ico desktop.py
+打包命令（使用 spec 文件，推荐）:
+    pyinstaller Zhui115.spec
+
+打包命令（手动命令行）:
+    pyinstaller --onefile --windowed --name Zhui115 ^
+      --add-data "app/static;app/static" ^
+      --add-data "app/web;app/web" ^
+      --add-data "app;app" ^
+      --hidden-import app.config --hidden-import app.scheduler ^
+      --hidden-import app.db --hidden-import app.notifier ^
+      --hidden-import app.rss --hidden-import app.offline115 ^
+      --hidden-import app.web.server --hidden-import app.web.api ^
+      --hidden-import apscheduler.triggers.interval ^
+      --hidden-import apscheduler.triggers.cron ^
+      --hidden-import cloudscraper --icon icon.ico desktop.py
 """
 
 import logging
@@ -20,8 +33,8 @@ import app.rss
 import app.offline115
 import app.notifier
 import app.scheduler
-import web.server
-import web.api
+import app.web.server   # 模块路径: app/web/server.py
+import app.web.api       # 模块路径: app/web/api.py
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QSystemTrayIcon, QMenu,
@@ -31,7 +44,7 @@ from PyQt6.QtCore import QUrl, Qt
 from PyQt6.QtGui import QIcon, QAction
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-# ── 项目根目录 ──
+# ── PyInstaller 路径兼容 ──
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 _MEIPASS = getattr(sys, '_MEIPASS', _ROOT)
 if _MEIPASS not in sys.path:
@@ -39,14 +52,16 @@ if _MEIPASS not in sys.path:
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+# ── 数据目录：PyInstaller onefile 时用 exe 所在目录，开发时用项目根目录 ──
+_DATA_DIR = os.path.join(_ROOT, "data")
+os.makedirs(_DATA_DIR, exist_ok=True)
+
 # ── 配置日志（写入文件，不弹控制台窗口） ──
-log_dir = os.path.join(_ROOT, "data")
-os.makedirs(log_dir, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    filename=os.path.join(log_dir, "zhui115.log"),
+    filename=os.path.join(_DATA_DIR, "zhui115.log"),
     filemode="a",
 )
 logger = logging.getLogger("zhui115.desktop")
@@ -54,10 +69,13 @@ logger = logging.getLogger("zhui115.desktop")
 
 def start_server() -> int:
     """在单独线程中启动 Web 服务，返回实际端口号"""
-    cfg = app.config.load_config()
+    cfg = app.config.load_global()
     port = cfg.get("web_port", 8300)
 
-    server = web.server.create_server(port)
+    # 直接创建 ThreadingHTTPServer（避免循环依赖）
+    server = app.web.server.ThreadingHTTPServer(
+        ("127.0.0.1", port), app.web.server.Zhui115Handler
+    )
     actual_port = server.server_address[1]
     logger.info("Web 服务已启动: http://127.0.0.1:%d", actual_port)
 
@@ -86,14 +104,14 @@ def run_desktop():
         port = start_server()
     except Exception as e:
         logger.exception("Web 服务启动失败")
-        app = QApplication(sys.argv if hasattr(sys, 'frozen') else [])
+        qapp = QApplication(sys.argv if getattr(sys, 'frozen', False) else [])
         QMessageBox.critical(None, "启动失败", f"Web 服务启动失败:\n{e}")
         sys.exit(1)
 
     start_scheduler_if_needed()
 
     # ── 创建 Qt 应用 ──
-    qt_app = QApplication(sys.argv if hasattr(sys, 'frozen') else [])
+    qt_app = QApplication(sys.argv if getattr(sys, 'frozen', False) else [])
     qt_app.setApplicationName("Zhui115")
     qt_app.setQuitOnLastWindowClosed(False)
 
@@ -103,7 +121,10 @@ def run_desktop():
     window.resize(1280, 800)
     window.setMinimumSize(900, 600)
 
-    icon_path = os.path.join(_ROOT, "icon.png")
+    # 图标查找：优先 .ico（Windows 托盘支持更好），其次 .png
+    icon_path = os.path.join(_ROOT, "icon.ico")
+    if not os.path.exists(icon_path):
+        icon_path = os.path.join(_ROOT, "icon.png")
     if os.path.exists(icon_path):
         app_icon = QIcon(icon_path)
         window.setWindowIcon(app_icon)

@@ -1,11 +1,28 @@
 """Zhui115 配置管理"""
 
 import json
+import os
+import sys
 import threading
 from pathlib import Path
 from typing import Optional
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+
+def _get_data_dir() -> Path:
+    """获取数据目录。
+
+    PyInstaller onefile 模式下 __file__ 指向 _MEIPASS（临时目录），
+    数据必须写到 exe 所在目录才能持久化。
+    """
+    if getattr(sys, 'frozen', False):
+        # PyInstaller onefile: exe 所在目录
+        return Path(sys.executable).resolve().parent / "data"
+    else:
+        # 开发模式: 项目根目录的 data/
+        return Path(__file__).resolve().parent.parent / "data"
+
+
+DATA_DIR = _get_data_dir()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 SOURCES_PATH = DATA_DIR / "sources.json"
@@ -112,6 +129,10 @@ def save_global(cfg: dict) -> bool:
 
 def load_sources() -> list[dict]:
     srcs = load_json(SOURCES_PATH, DEFAULT_SOURCES)
+    # 文件存在但为空列表 → 回退到默认源（用户首次使用的友好行为）
+    if not srcs:
+        srcs = DEFAULT_SOURCES
+        save_sources(srcs)
     # 补缺失字段
     changed = False
     fields = _SOURCE_FIELDS

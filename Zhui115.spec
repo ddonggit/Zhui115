@@ -16,10 +16,10 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=[],
     datas=[
-        # 前端静态文件
-        (str(ROOT / 'web/static/index.html'), 'web/static'),
-        (str(ROOT / 'web/static/style.css'), 'web/static'),
-        (str(ROOT / 'web/static/app.js'), 'web/static'),
+        # 前端静态文件（路径: app/static/, server.py 中 STATIC_DIR 匹配）
+        (str(ROOT / 'app/static/index.html'), 'app/static'),
+        (str(ROOT / 'app/static/style.css'), 'app/static'),
+        (str(ROOT / 'app/static/app.js'), 'app/static'),
         (str(ROOT / 'app/__init__.py'), 'app'),
         (str(ROOT / 'app/config.py'), 'app'),
         (str(ROOT / 'app/db.py'), 'app'),
@@ -30,14 +30,20 @@ a = Analysis(
         (str(ROOT / 'app/web/__init__.py'), 'app/web'),
         (str(ROOT / 'app/web/api.py'), 'app/web'),
         (str(ROOT / 'app/web/server.py'), 'app/web'),
+        # 图标（打包进 exe，运行时 desktop.py 可通过 _MEIPASS 读取）
+        (str(ROOT / 'icon.ico'), '.'),
+        (str(ROOT / 'icon.png'), '.'),
     ],
     hiddenimports=[
         'PyQt6',
         'PyQt6.QtWebEngineWidgets',
         'PyQt6.QtWebEngineCore',
+        'app.web.server',
+        'app.web.api',
         'apscheduler.triggers.interval',
         'apscheduler.triggers.cron',
         'cloudscraper',
+        'p115client',
     ],
     hookspath=[],
     hooksconfig={},
@@ -76,5 +82,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(ROOT / 'icon.png') if (ROOT / 'icon.png').exists() else None,
+    icon=str(ROOT / 'icon.ico') if (ROOT / 'icon.ico').exists() else None,
 )
